@@ -675,7 +675,7 @@ pub struct GetBlockResponse {
     pub height: u32,
 }
 
-#[cfg(all(test, feature = "test-docker"))]
+#[cfg(all(test, feature = "testcontainers"))]
 mod test {
     use super::*;
     use crate::Bitcoind;
