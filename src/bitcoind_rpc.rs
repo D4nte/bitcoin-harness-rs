@@ -1,11 +1,11 @@
 //! An incomplete async bitcoind rpc client that support multi-wallet features
 
-use crate::bitcoind_rpc_api::{
-    Account, AddressInfoResponse, BitcoindRpcApi, FinalizePsbtResponse, GetTransactionResponse,
-    GetWalletInfoResponse, PsbtBase64, Unspent, WalletProcessPsbtResponse,
-};
+use crate::bitcoind_rpc_api::{Account, BitcoindRpcApi, PsbtBase64, WalletProcessPsbtResponse};
 use ::bitcoin::{hashes::hex::FromHex, Address, Amount, Network, Transaction, Txid};
-use bitcoin::consensus::encode;
+use bitcoincore_rpc_json::{
+    FinalizePsbtResult, GetAddressInfoResult, GetTransactionResult, GetWalletInfoResult,
+    ListUnspentResultEntry,
+};
 use reqwest::Url;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
@@ -42,10 +42,17 @@ impl Client {
     pub async fn network(&self) -> Result<Network> {
         let blockchain_info = self.getblockchaininfo().await?;
 
-        Ok(blockchain_info.chain)
+        let network = match blockchain_info.chain.as_str() {
+            "main" => Network::Bitcoin,
+            "test" => Network::Testnet,
+            "regtest" => Network::Regtest,
+            _ => return Err(Error::UnexpectedResponse),
+        };
+
+        Ok(network)
     }
 
-    pub async fn median_time(&self) -> Result<u32> {
+    pub async fn median_time(&self) -> Result<u64> {
         let blockchain_info = self.getblockchaininfo().await?;
 
         Ok(blockchain_info.median_time)
@@ -97,7 +104,7 @@ impl Client {
         Ok(address)
     }
 
-    pub async fn get_wallet_info(&self, wallet_name: &str) -> Result<GetWalletInfoResponse> {
+    pub async fn get_wallet_info(&self, wallet_name: &str) -> Result<GetWalletInfoResult> {
         let response = self.with_wallet(wallet_name)?.getwalletinfo().await?;
         Ok(response)
     }
@@ -124,7 +131,7 @@ impl Client {
     ) -> Result<Txid> {
         let txid = self
             .with_wallet(wallet_name)?
-            .sendrawtransaction(transaction)
+            .sendrawtransaction(transaction.into())
             .await?;
         let txid = Txid::from_hex(&txid)?;
         Ok(txid)
@@ -170,7 +177,7 @@ impl Client {
         &self,
         wallet_name: &str,
         txid: Txid,
-    ) -> Result<GetTransactionResponse> {
+    ) -> Result<GetTransactionResult> {
         let res = self.with_wallet(wallet_name)?.gettransaction(txid).await?;
 
         Ok(res)
@@ -188,7 +195,7 @@ impl Client {
         max_conf: Option<u32>,
         addresses: Option<Vec<Address>>,
         include_unsafe: Option<bool>,
-    ) -> Result<Vec<Unspent>> {
+    ) -> Result<Vec<ListUnspentResultEntry>> {
         let unspents = self
             .with_wallet(wallet_name)?
             .listunspent(min_conf, max_conf, addresses, include_unsafe)
@@ -227,11 +234,12 @@ impl Client {
             .await?;
         Ok(psbt)
     }
+
     pub async fn finalize_psbt(
         &self,
         wallet_name: &str,
         psbt: PsbtBase64,
-    ) -> Result<FinalizePsbtResponse> {
+    ) -> Result<FinalizePsbtResult> {
         let psbt = self.with_wallet(wallet_name)?.finalizepsbt(psbt).await?;
         Ok(psbt)
     }
@@ -240,7 +248,7 @@ impl Client {
         &self,
         wallet_name: &str,
         address: &Address,
-    ) -> Result<AddressInfoResponse> {
+    ) -> Result<GetAddressInfoResult> {
         let address_info = self
             .with_wallet(wallet_name)?
             .getaddressinfo(address)
@@ -251,7 +259,7 @@ impl Client {
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("JSON Rpc Cliient: ")]
+    #[error("JSON Rpc Client: ")]
     JsonRpcClient(#[from] jsonrpc_client::Error<reqwest::Error>),
     #[error("Serde JSON: ")]
     SerdeJson(#[from] serde_json::Error),
@@ -272,14 +280,6 @@ pub enum Error {
 struct BlockchainInfo {
     chain: Network,
     mediantime: u32,
-}
-
-impl FinalizePsbtResponse {
-    pub fn transaction(&self) -> Result<Transaction> {
-        let data = hex::decode(&self.hex).unwrap();
-        let transaction = encode::deserialize(data.as_slice())?;
-        Ok(transaction)
-    }
 }
 
 /// Response to the RPC command `getrawtransaction`, when the second

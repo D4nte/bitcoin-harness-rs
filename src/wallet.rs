@@ -1,9 +1,10 @@
 use crate::bitcoind_rpc::{Client, Result};
-use crate::bitcoind_rpc_api::{
-    AddressInfoResponse, BitcoindRpcApi, FinalizePsbtResponse, GetTransactionResponse,
-    GetWalletInfoResponse, PsbtBase64, Unspent, WalletProcessPsbtResponse,
-};
+use crate::bitcoind_rpc_api::{BitcoindRpcApi, PsbtBase64, WalletProcessPsbtResponse};
 use bitcoin::{Address, Amount, Transaction, Txid};
+use bitcoincore_rpc_json::{
+    FinalizePsbtResult, GetAddressInfoResult, GetTransactionResult, GetWalletInfoResult,
+    ListUnspentResultEntry,
+};
 use url::Url;
 
 /// A wrapper to bitcoind wallet
@@ -41,11 +42,11 @@ impl Wallet {
         }
     }
 
-    pub async fn info(&self) -> Result<GetWalletInfoResponse> {
+    pub async fn info(&self) -> Result<GetWalletInfoResult> {
         Ok(self.bitcoind_client.get_wallet_info(&self.name).await?)
     }
 
-    pub async fn median_time(&self) -> Result<u32> {
+    pub async fn median_time(&self) -> Result<u64> {
         Ok(self.bitcoind_client.median_time().await?)
     }
 
@@ -81,15 +82,15 @@ impl Wallet {
         self.bitcoind_client.get_raw_transaction(txid).await
     }
 
-    pub async fn get_wallet_transaction(&self, txid: Txid) -> Result<GetTransactionResponse> {
+    pub async fn get_wallet_transaction(&self, txid: Txid) -> Result<GetTransactionResult> {
         self.bitcoind_client.get_transaction(&self.name, txid).await
     }
 
-    pub async fn address_info(&self, address: &Address) -> Result<AddressInfoResponse> {
+    pub async fn address_info(&self, address: &Address) -> Result<GetAddressInfoResult> {
         self.bitcoind_client.address_info(&self.name, address).await
     }
 
-    pub async fn list_unspent(&self) -> Result<Vec<Unspent>> {
+    pub async fn list_unspent(&self) -> Result<Vec<ListUnspentResultEntry>> {
         self.bitcoind_client
             .list_unspent(&self.name, None, None, None, None)
             .await
@@ -111,11 +112,11 @@ impl Wallet {
             .await
     }
 
-    pub async fn finalize_psbt(&self, psbt: PsbtBase64) -> Result<FinalizePsbtResponse> {
+    pub async fn finalize_psbt(&self, psbt: PsbtBase64) -> Result<FinalizePsbtResult> {
         self.bitcoind_client.finalize_psbt(&self.name, psbt).await
     }
 
-    pub async fn transaction_block_height(&self, txid: Txid) -> Result<Option<u32>> {
+    pub async fn transaction_block_height(&self, txid: Txid) -> Result<Option<u64>> {
         let res = self
             .bitcoind_client
             .get_raw_transaction_verbose(txid)
@@ -128,7 +129,7 @@ impl Wallet {
 
         let res = self.bitcoind_client.getblock(&block_hash).await?;
 
-        Ok(Some(res.height))
+        Ok(Some(res.height as u64))
     }
 }
 
@@ -247,10 +248,8 @@ mod test {
 
         let alice_finalized_psbt = alice.finalize_psbt(bob_signed_psbt.into()).await.unwrap();
 
-        let txid = alice
-            .send_raw_transaction(alice_finalized_psbt.transaction().unwrap())
-            .await
-            .unwrap();
+        let transaction = alice_finalized_psbt.transaction().unwrap().unwrap();
+        let txid = alice.send_raw_transaction(transaction).await.unwrap();
         println!("Final tx_id: {:?}", txid);
     }
 

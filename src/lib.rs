@@ -59,7 +59,7 @@
 //!
 //! let utxos = wallet.list_unspent().await.unwrap();
 //!
-//! assert_eq!(utxos.get(0).unwrap().amount, 3.0);
+//! assert_eq!(utxos.get(0).unwrap().amount, amount);
 //! # }
 //! ```
 
